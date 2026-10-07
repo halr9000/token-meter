@@ -59,6 +59,34 @@ troubleshooting are in the [User guide](specs/USER_GUIDE.md).
 Runtimes: Claude Code and Desktop (Agent/Cowork), Codex CLI and desktop, Cursor
 Agent/Composer, OpenCode, Kiro, and Pi. Only sessions stored locally are visible.
 
+## Package managers (experimental)
+
+The repository includes a macOS Homebrew formula, a Scoop manifest generator,
+and a per-user Windows installer with WinGet manifest generation. These are
+publication candidates; maintainers choose which Windows channels to support.
+They are not yet listed in the Splunk tap or public Windows package indexes.
+Use the [package testing guide](specs/PACKAGE_MANAGERS.md) to test them locally.
+
+After the formula is published in `splunk/homebrew-tap`, install it with
+`brew install --HEAD splunk/tap/token-meter` until a stable release is available,
+then run `token-meter install` (or `token-meter install --backend-only`).
+Update with `brew upgrade token-meter`, then re-run `token-meter install` to
+stage and restart the upgraded version (preserving backend-only mode). Stop it with `token-meter uninstall` before
+`brew uninstall token-meter`. Staged runtime files and settings are retained.
+
+For a published Scoop manifest, the chosen bucket supplies `scoop install
+token-meter`, `scoop update token-meter`, and `scoop uninstall token-meter`.
+For a published WinGet manifest, use `winget install --id Splunk.TokenMeter
+--exact --scope user`, `winget upgrade --id Splunk.TokenMeter --exact`, and
+`winget uninstall --id Splunk.TokenMeter --exact`. Both Windows packages use the
+existing per-user server, notification-area companion, and login startup entry.
+Their uninstall hooks remove the owned runtime while retaining application
+settings and agent evidence. Windows package execution requires Windows testing.
+
+Package-managed installs disable the built-in Git updater and show the appropriate
+upgrade command in Settings. Reinstalling from a normal checkout returns update
+ownership to the Git installer without changing your saved update preferences.
+
 ## Features
 
 ### Follow a session
@@ -130,7 +158,8 @@ structure and numbers, not raw trace content. See the
 ### Menu bar and tray
 
 See the current run without opening the dashboard. Updates are checked every
-10 minutes and installed automatically by default.
+10 minutes and installed automatically by default for checkout installations.
+Package-managed installations use their package manager for updates.
 
 <p align="center">
   <img src="images/menu-bar-widget.png" alt="Token Meter macOS menu bar companion" width="420">
@@ -154,6 +183,7 @@ Full details: [User guide](specs/USER_GUIDE.md#data-and-evidence) ·
 | [Security](specs/SECURITY.md) | Privacy boundaries, vulnerability reporting |
 | [Architecture](specs/ARCHITECTURE.md) | Components, data flow, extension contracts |
 | [Contributing](specs/CONTRIBUTING.md) | Issues, pull requests, validation |
+| [Package managers](specs/PACKAGE_MANAGERS.md) | Experimental Homebrew, Scoop, WinGet, release packaging, and test instructions |
 | [Product](specs/PRODUCT.md) · [Design](specs/DESIGN.md) | Product and experience decisions |
 
 ## License

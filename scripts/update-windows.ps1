@@ -10,6 +10,13 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RuntimeRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$PackageMarker = Join-Path $RuntimeRoot "PACKAGE_MANAGER"
+if (Test-Path -LiteralPath $PackageMarker -PathType Leaf) {
+    switch ((Get-Content -LiteralPath $PackageMarker -Raw).Trim()) {
+        "scoop" { throw "Scoop manages this installation. Run scoop update token-meter." }
+        "winget" { throw "WinGet manages this installation. Run winget upgrade --id Splunk.TokenMeter --exact." }
+    }
+}
 $SourceRoot = [System.IO.Path]::GetFullPath($SourceRoot)
 $StatusPath = [System.IO.Path]::GetFullPath($StatusPath)
 $PreviousStatus = @{}

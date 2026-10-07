@@ -460,6 +460,8 @@ exit 0
         remote = workspace / "upstream.git"
         checkout = workspace / "checkout"
         self.git("clone", "--bare", "--no-local", str(ROOT), str(remote), cwd=workspace)
+        self.git("update-ref", "refs/heads/main", "HEAD", cwd=remote)
+        self.git("symbolic-ref", "HEAD", "refs/heads/main", cwd=remote)
         self.git("clone", "--no-local", str(remote), str(checkout), cwd=workspace)
         self.git("config", "user.name", "Token Meter Test", cwd=checkout)
         self.git("config", "user.email", "token-meter-test@example.invalid", cwd=checkout)

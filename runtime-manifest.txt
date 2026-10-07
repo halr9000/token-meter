@@ -21,6 +21,7 @@ required scripts/update
 required scripts/update-linux
 optional README.md
 optional LICENSE
+optional RELEASE_VERSION
 python-tree token_meter
 tree menubar
 tree scripts

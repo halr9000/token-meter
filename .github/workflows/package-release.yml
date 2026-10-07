@@ -1,0 +1,183 @@
+name: Package release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag to build (vMAJOR.MINOR.PATCH); manual runs upload artifacts only
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && !github.event.release.draft)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.14'
+      - name: Validate stable tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build reproducible source packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/package-release.py --version "$VERSION" --repository "$REPOSITORY" --output "$RUNNER_TEMP/packages"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-packages
+          path: ${{ runner.temp }}/packages
+          if-no-files-found: error
+
+  windows:
+    needs: source
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: source-packages
+          path: ${{ runner.temp }}/packages
+      - name: Build per-user Windows installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'The runner must provide Inno Setup 6.' }
+          $source = Join-Path $env:RUNNER_TEMP 'source'
+          Expand-Archive (Join-Path $env:RUNNER_TEMP "packages\token-meter-$env:VERSION.zip") $source
+          .\scripts\build-windows-installer.ps1 -Version $env:VERSION -SourceRoot (Join-Path $source "token-meter-$env:VERSION") -OutputRoot (Join-Path $env:RUNNER_TEMP 'windows-installer') -Compiler $compiler
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer
+          path: ${{ runner.temp }}/windows-installer/*.exe
+          if-no-files-found: error
+
+  descriptors:
+    needs: [source, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.14'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-installer
+          path: ${{ runner.temp }}/packages
+      - name: Generate checksums and all package descriptors
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/package-release.py --version "$VERSION" --repository "$REPOSITORY" --output "$RUNNER_TEMP/packages" --winget-installer "$RUNNER_TEMP/packages/token-meter-$VERSION-windows-setup.exe"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-packages
+          path: ${{ runner.temp }}/packages
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'release'
+    needs: descriptors
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-packages
+          path: ${{ runner.temp }}/packages
+      - name: Attach packages to the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 scripts/publish-package-assets.py --tag "$RELEASE_TAG" --repository "$REPOSITORY" "$RUNNER_TEMP/packages/"*.tar.gz "$RUNNER_TEMP/packages/"*.zip "$RUNNER_TEMP/packages/"*.exe "$RUNNER_TEMP/packages/SHA256SUMS" "$RUNNER_TEMP/packages/token-meter.rb" "$RUNNER_TEMP/packages/token-meter.json" "$RUNNER_TEMP/packages/winget/Splunk.TokenMeter.yaml"
+
+  update-package-repositories:
+    if: github.event_name == 'release'
+    needs: [source, publish]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - manager: homebrew
+            file: token-meter.rb
+            path: token-meter.rb
+          - manager: scoop
+            file: token-meter.json
+            path: bucket/token-meter.json
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-packages
+          path: ${{ runner.temp }}/packages
+      - name: Propose package repository update when configured
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_REPOSITORY_TOKEN }}
+          TARGET_REPO: ${{ matrix.manager == 'homebrew' && vars.HOMEBREW_TAP_REPOSITORY || vars.SCOOP_BUCKET_REPOSITORY }}
+          MANAGER: ${{ matrix.manager }}
+          PACKAGE_FILE: ${{ matrix.file }}
+          PACKAGE_PATH: ${{ matrix.path }}
+          VERSION: ${{ needs.source.outputs.version }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          if [[ -z "$GH_TOKEN" || -z "$TARGET_REPO" ]]; then
+            echo "Package repository publication is not configured for $MANAGER."
+            exit 0
+          fi
+          [[ "$TARGET_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || exit 1
+          gh auth setup-git
+          gh repo clone "$TARGET_REPO" "$RUNNER_TEMP/package-repository" -- --depth=1
+          cd "$RUNNER_TEMP/package-repository"
+          branch="codex/token-meter-v$VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git fetch origin "$branch"
+            git switch -c "$branch" FETCH_HEAD
+          else
+            git switch -c "$branch"
+          fi
+          mkdir -p "$(dirname "$PACKAGE_PATH")"
+          cp "$RUNNER_TEMP/packages/$PACKAGE_FILE" "$PACKAGE_PATH"
+          git add "$PACKAGE_PATH"
+          if ! git diff --cached --quiet; then
+            git -c user.name='Token Meter package bot' -c user.email='token-meter-packages@users.noreply.github.com' commit -m "Update token-meter to $VERSION"
+            git push origin "$branch"
+          fi
+          if [[ "$(gh pr list --repo "$TARGET_REPO" --head "$branch" --state all --json number --jq 'length')" == 0 ]]; then
+            printf 'Update Token Meter to version %s using the versioned release archive and its SHA-256.\n\nRelease: https://github.com/%s/releases/tag/v%s\n\nGenerated descriptors require package-repository review; this workflow does not merge.\n' "$VERSION" "$SOURCE_REPO" "$VERSION" > "$RUNNER_TEMP/package-pr.md"
+            gh pr create --repo "$TARGET_REPO" --head "$branch" --title "Update token-meter to $VERSION" --body-file "$RUNNER_TEMP/package-pr.md"
+          fi

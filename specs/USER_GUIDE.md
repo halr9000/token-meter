@@ -363,6 +363,13 @@ model provider under its own terms.
 
 ## Software Updates
 
+Experimental package-manager installations use their package manager for updates;
+the Git update controls below are disabled. For Homebrew, run
+`brew upgrade token-meter`, then `token-meter install` to stage and restart the new
+version. Scoop uses `scoop update token-meter`; WinGet uses
+`winget upgrade --id Splunk.TokenMeter --exact`. Package channels require maintainer
+publication; see [Package managers](PACKAGE_MANAGERS.md) for candidate testing.
+
 **Check for updates every 10 minutes** and **Automatically install available
 updates** are both enabled by default. They are separate controls: turning off
 automatic installation keeps checks running, while turning off checks also

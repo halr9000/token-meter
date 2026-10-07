@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ENTRYPOINT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+case "$(cat "$ENTRYPOINT_ROOT/PACKAGE_MANAGER" 2>/dev/null || true)" in
+  homebrew) echo "Homebrew manages this installation. Run brew upgrade token-meter, then token-meter install." >&2; exit 1 ;;
+  scoop) echo "Scoop manages this installation. Run scoop update token-meter." >&2; exit 1 ;;
+esac
 case "$(uname -s)" in
   Linux)
     if [[ "${TOKEN_METER_UPDATE_LINUX_HELPER:-}" != "1" ]]; then

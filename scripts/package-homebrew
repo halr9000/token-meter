@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RUNTIME_ROOT="${TOKEN_METER_INSTALL_ROOT:-$HOME/Library/Application Support/Token Meter/runtime}"
+case "${1:---help}" in
+  install)
+    shift
+    arguments=("$@")
+    if [[ ${#arguments[@]} -eq 0 && "$(cat "$RUNTIME_ROOT/PACKAGE_MANAGER" 2>/dev/null || true)" == homebrew \
+          && "$(cat "$RUNTIME_ROOT/INSTALL_MODE" 2>/dev/null || true)" == backend-only ]]; then
+      arguments=(--backend-only)
+    fi
+    exec env TOKEN_METER_PACKAGE_MANAGER=homebrew "$SOURCE_ROOT/scripts/install" "${arguments[@]}"
+    ;;
+  refresh)
+    [[ "$(cat "$RUNTIME_ROOT/PACKAGE_MANAGER" 2>/dev/null || true)" == homebrew ]] || exit 0
+    arguments=()
+    if [[ "$(cat "$RUNTIME_ROOT/INSTALL_MODE" 2>/dev/null || true)" == backend-only ]]; then
+      arguments=(--backend-only)
+    fi
+    exec env TOKEN_METER_PACKAGE_MANAGER=homebrew "$SOURCE_ROOT/scripts/install" "${arguments[@]}"
+    ;;
+  uninstall)
+    [[ "$(cat "$RUNTIME_ROOT/PACKAGE_MANAGER" 2>/dev/null || true)" == homebrew ]] || {
+      echo "This runtime is not managed by Homebrew; automatic startup was left unchanged." >&2
+      exit 1
+    }
+    exec "$RUNTIME_ROOT/scripts/uninstall-launch-agent"
+    ;;
+  --help|-h)
+    echo "Usage: token-meter install [--backend-only] | uninstall | refresh"
+    ;;
+  *) echo "Unknown token-meter command. Run token-meter --help." >&2; exit 2 ;;
+esac

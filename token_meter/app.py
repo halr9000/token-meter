@@ -1918,8 +1918,29 @@ def normalize_update_settings(values):
     }
 
 
+def installation_package_manager():
+    """Read an installer-owned allowlisted marker; never project its raw text."""
+    try:
+        with open(os.path.join(_SOURCE_ROOT, "PACKAGE_MANAGER"), encoding="utf-8") as fh:
+            value = fh.read(32).strip()
+    except (OSError, UnicodeError):
+        return ""
+    return value if value in {"homebrew", "scoop", "winget"} else ""
+
+
+def package_update_message(manager):
+    label, command = {
+        "homebrew": ("Homebrew", "brew upgrade token-meter, then token-meter install"),
+        "scoop": ("Scoop", "scoop update token-meter"),
+        "winget": ("WinGet", "winget upgrade --id Splunk.TokenMeter --exact"),
+    }[manager]
+    return f"{label} manages this installation. Update with {command}."
+
+
 def update_settings(path=None):
     """Load the default-on update-check and installation preferences."""
+    if installation_package_manager():
+        return normalize_update_settings({"enabled": False, "auto_install": False})
     path = path or TOKEN_METER_SETTINGS
     settings = load_json(path, {})
     raw = settings.get("updates") if isinstance(settings, dict) else {}
@@ -1936,6 +1957,9 @@ def set_update_settings(values, path=None):
         normalized = normalize_update_settings(values)
     except ValueError as error:
         return {"ok": False, "error": str(error)}
+    manager = installation_package_manager()
+    if manager:
+        return {"ok": False, "error": package_update_message(manager)}
     settings = load_json(path, {})
     if not isinstance(settings, dict):
         settings = {}
@@ -1967,6 +1991,8 @@ def _safe_update_int(value):
 
 def source_checkout_path():
     """Find the installer checkout without returning it through the HTTP API."""
+    if installation_package_manager():
+        return ""
     runtime_root = _SOURCE_ROOT
     candidates = []
     explicit = os.environ.get("TOKEN_METER_SOURCE_CHECKOUT")
@@ -2087,6 +2113,7 @@ def software_update_status(settings_path=None, status_path=None):
     else:
         state = "waiting"
     checked_at = _safe_update_int(raw.get("checked_at"))
+    manager = installation_package_manager()
     return {
         "enabled": enabled,
         "auto_install": settings["auto_install"],
@@ -2104,8 +2131,9 @@ def software_update_status(settings_path=None, status_path=None):
         "checked_at": checked_at,
         "next_check_at": checked_at + UPDATE_CHECK_INTERVAL_S if enabled and checked_at else 0,
         "installed_at": _safe_update_int(raw.get("installed_at")),
-        "message": _update_message(state, error_code, latest_revision),
-        "actions": {"token": _ACTION_TOKEN, "check": True, "install": True},
+        "message": (package_update_message(manager) if manager
+                    else _update_message(state, error_code, latest_revision)),
+        "actions": {"token": _ACTION_TOKEN, "check": not manager, "install": not manager},
     }
 
 
@@ -2244,6 +2272,9 @@ def check_for_software_update(
 
 def trigger_software_update_check(settings_path=None, status_path=None):
     """Start one non-blocking update check for a dashboard or settings action."""
+    manager = installation_package_manager()
+    if manager:
+        return {"ok": False, "error": package_update_message(manager)}
     if not update_settings(settings_path)["enabled"]:
         return {"ok": False, "error": "Enable automatic update checks first."}
     if str(_update_status_record(status_path).get("phase") or "") in {
@@ -2268,6 +2299,9 @@ def trigger_software_update_check(settings_path=None, status_path=None):
 
 def start_software_update(popen=None, settings_path=None, status_path=None):
     """Launch the detached fast-forward-and-reinstall helper."""
+    manager = installation_package_manager()
+    if manager:
+        return {"ok": False, "error": package_update_message(manager)}
     status = software_update_status(settings_path, status_path)
     raw = _update_status_record(status_path)
     if not status["enabled"]:

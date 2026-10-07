@@ -2,7 +2,9 @@
 param(
     [string]$InstallRoot = "",
     [int]$ReadinessTimeoutSeconds = 0,
-    [switch]$BackendOnly
+    [switch]$BackendOnly,
+    [ValidateSet("", "scoop", "winget")]
+    [string]$PackageManager = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -300,6 +302,9 @@ if ($ReadinessTimeoutSeconds -le 0) {
 $null = Refresh-ProcessPath
 $Git = Get-UsableGit
 if (-not $Git) {
+    if ($PackageManager) {
+        Fail "Git is unavailable. Install the declared package-manager dependencies before retrying."
+    }
     Install-Prerequisite "Git.MinGit"
     $Git = Get-UsableGit
     if (-not $Git) {
@@ -309,6 +314,9 @@ if (-not $Git) {
 
 $PythonExe = Find-CompatiblePython
 if (-not $PythonExe) {
+    if ($PackageManager) {
+        Fail "Python is unavailable. Install the declared package-manager dependencies before retrying."
+    }
     Install-Prerequisite "Python.Python.3.14" -UserScope
     $PythonExe = Find-CompatiblePython
     if (-not $PythonExe) {
@@ -344,7 +352,10 @@ $ManagedSourceRoot = if ($env:TOKEN_METER_SOURCE_ROOT) {
     Join-Path $InstallParent "source"
 }
 $UpdateSourceRoot = $SourceRoot
-$SourceUpstream = (& $Git.Source -C $SourceRoot rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null | Out-String).Trim()
+$SourceUpstream = ""
+if (-not $PackageManager) {
+    $SourceUpstream = (& $Git.Source -C $SourceRoot rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null | Out-String).Trim()
+}
 if ($SourceUpstream -like "*/*" -and $SourceRoot -ne $ManagedSourceRoot) {
     $Slash = $SourceUpstream.IndexOf('/')
     $SourceRemote = $SourceUpstream.Substring(0, $Slash)
@@ -464,17 +475,28 @@ try {
 } finally {
     Pop-Location
 }
-Write-Utf8File (Join-Path $StagingRoot "SOURCE_CHECKOUT") ($UpdateSourceRoot + [Environment]::NewLine)
+if ($PackageManager) {
+    Write-Utf8File (Join-Path $StagingRoot "PACKAGE_MANAGER") ($PackageManager + [Environment]::NewLine)
+} else {
+    Write-Utf8File (Join-Path $StagingRoot "SOURCE_CHECKOUT") ($UpdateSourceRoot + [Environment]::NewLine)
+}
 Write-Utf8File (Join-Path $StagingRoot "PYTHON_EXECUTABLE") ($PythonExe + [Environment]::NewLine)
 Write-Utf8File (Join-Path $StagingRoot "PYTHON_WINDOWED_EXECUTABLE") ($PythonwExe + [Environment]::NewLine)
 $InstallMode = if ($BackendOnly) { "backend-only" } else { "full" }
 Write-Utf8File (Join-Path $StagingRoot "INSTALL_MODE") ($InstallMode + [Environment]::NewLine)
 
-$Commit = (& $Git.Source -C $SourceRoot rev-parse --short HEAD 2>$null | Out-String).Trim()
+$Commit = ""
+if (Test-Path -LiteralPath (Join-Path $SourceRoot ".git")) {
+    $Commit = (& $Git.Source -C $SourceRoot rev-parse --short HEAD 2>$null | Out-String).Trim()
+} elseif (Test-Path -LiteralPath (Join-Path $SourceRoot "RELEASE_VERSION") -PathType Leaf) {
+    $Commit = (Get-Content -LiteralPath (Join-Path $SourceRoot "RELEASE_VERSION") -Raw).Trim()
+}
 if ($Commit) {
     $DirtyPaths = @(
+        if (Test-Path -LiteralPath (Join-Path $SourceRoot ".git")) {
         & $Git.Source -C $SourceRoot status --short --untracked-files=all 2>$null |
             Where-Object { $_ -and $_ -notmatch '^\?\? plan\.md$' }
+        }
     )
     if ($DirtyPaths.Count -gt 0) {
         $Commit = "$Commit+local"
@@ -594,6 +616,6 @@ Write-Host "Starts automatically after you log in."
 Write-Host "Runtime: $InstallRoot"
 Write-Host "Python: $PythonExe ($PythonArchitecture)"
 if ($Commit) {
-    Write-Host "Installed commit: $Commit"
+    Write-Host "Installed revision: $Commit"
 }
 Write-Host "Uninstall: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$InstallRoot\scripts\uninstall-windows.ps1`""

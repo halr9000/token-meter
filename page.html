@@ -3882,6 +3882,7 @@ function renderSoftwareUpdate(status){
  SOFTWARE_UPDATE=status;
  const state=status.state||'waiting',enabled=!!status.enabled;
  $('update-enabled').checked=enabled;
+ $('update-enabled').disabled=status.actions?.check===false;
  $('update-auto-install').checked=enabled&&status.auto_install===true;
  $('update-auto-install').disabled=!enabled;
  $('update-check').disabled=!enabled||status.checking||status.updating;
@@ -3972,7 +3973,7 @@ async function saveSoftwareUpdatePreferences(event){
   renderSoftwareUpdate(SOFTWARE_UPDATE);
   showAppToast({title:'Update setting could not be saved',body:error.message||String(error),kind:'warn',sticky:true});
  }finally{
-  $('update-enabled').disabled=false;
+  $('update-enabled').disabled=SOFTWARE_UPDATE?.actions?.check===false;
   $('update-auto-install').disabled=!$('update-enabled').checked;
  }
 }
